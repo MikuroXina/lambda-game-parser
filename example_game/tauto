@@ -1,0 +1,6 @@
+A[1][
+    X :: x : A |- x : A in Lambda since
+        x : A by var {
+            X
+        }
+]

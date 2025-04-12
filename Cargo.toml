@@ -1,0 +1,10 @@
+[package]
+name = "lambda-game-parser"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.97"
+nom = "8.0.0"
+nom-language = "0.1.0"
+thiserror = "2.0.12"
