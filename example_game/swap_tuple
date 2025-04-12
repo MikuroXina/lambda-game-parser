@@ -1,0 +1,15 @@
+A[2][
+    X :: x : A × B |- <right(x), left(x)> : B × A in Lambda since
+        <right(x), left(x)> : B × A by pair {
+            right(x) : B by right {
+                x : A × B by var {
+                    X
+                }
+            };
+            left(x) : A by left {
+                x : A × B by var {
+                    X
+                }
+            }
+        }
+]
