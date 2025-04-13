@@ -4,9 +4,9 @@ use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::{alpha1, alphanumeric1, multispace0, multispace1},
-    combinator::{fail, map, recognize},
+    combinator::{cut, fail, map, recognize},
     multi::{many0, separated_list0, separated_list1},
-    sequence::{delimited, pair, preceded, terminated},
+    sequence::{delimited, pair, preceded, separated_pair, terminated},
 };
 use nom_language::precedence::{Assoc, Operation, binary_op, precedence};
 
@@ -433,13 +433,16 @@ fn parse_pair(i: &str) -> IResult<&str, Expression> {
 
 fn parse_case(i: &str) -> IResult<&str, Expression> {
     let (i, or) = preceded((tag("case("), multispace0), parse_expression).parse(i)?;
-    let (i, left_case) =
-        preceded((multispace0, tag(","), multispace0), parse_expression).parse(i)?;
-    let (i, right_case) = delimited(
+    let (i, left_case) = cut(preceded(
+        (multispace0, tag(","), multispace0),
+        parse_expression,
+    ))
+    .parse(i)?;
+    let (i, right_case) = cut(delimited(
         (multispace0, tag(","), multispace0),
         parse_expression,
         (multispace0, tag(")"), multispace0),
-    )
+    ))
     .parse(i)?;
     Ok((
         i,
@@ -452,14 +455,21 @@ fn parse_case(i: &str) -> IResult<&str, Expression> {
 }
 
 fn parse_var_decl(i: &str) -> IResult<&str, (VarId, Type)> {
-    let (i, var) = terminated(parse_var_id, (multispace0, tag(":"), multispace0)).parse(i)?;
-    let (i, ty) = parse_type(i)?;
-    Ok((i, (var, ty)))
+    separated_pair(
+        parse_var_id,
+        (multispace0, tag(":"), multispace0),
+        parse_type,
+    )
+    .parse(i)
 }
 
 fn parse_lambda(i: &str) -> IResult<&str, Expression> {
     let (i, (id, ty)) = preceded((tag("lambda"), multispace1), parse_var_decl).parse(i)?;
-    let (i, body) = preceded((multispace0, tag("."), multispace1), parse_expression).parse(i)?;
+    let (i, body) = cut(preceded(
+        (multispace0, tag("."), multispace1),
+        parse_expression,
+    ))
+    .parse(i)?;
     Ok((
         i,
         Expression::Lambda {
@@ -530,7 +540,7 @@ fn parse_proof(i: &str) -> IResult<&str, Proof> {
     alt((
         map(
             delimited(
-                (tag("var"), multispace1, tag("{"), multispace0),
+                (tag("var"), multispace0, tag("{"), multispace0),
                 parse_assumption_id,
                 (multispace0, tag("}"), multispace0),
             ),
@@ -538,7 +548,7 @@ fn parse_proof(i: &str) -> IResult<&str, Proof> {
         ),
         map(
             delimited(
-                (tag("pair"), multispace1, tag("{"), multispace0),
+                (tag("pair"), multispace0, tag("{"), multispace0),
                 (
                     terminated(parse_derivation, (multispace0, tag(";"), multispace0)),
                     parse_derivation,
@@ -552,7 +562,7 @@ fn parse_proof(i: &str) -> IResult<&str, Proof> {
         ),
         map(
             delimited(
-                (tag("left"), multispace1, tag("{"), multispace0),
+                (tag("left"), multispace0, tag("{"), multispace0),
                 parse_derivation,
                 (multispace0, tag("}"), multispace0),
             ),
@@ -560,7 +570,7 @@ fn parse_proof(i: &str) -> IResult<&str, Proof> {
         ),
         map(
             delimited(
-                (tag("right"), multispace1, tag("{"), multispace0),
+                (tag("right"), multispace0, tag("{"), multispace0),
                 parse_derivation,
                 (multispace0, tag("}"), multispace0),
             ),
@@ -568,7 +578,7 @@ fn parse_proof(i: &str) -> IResult<&str, Proof> {
         ),
         map(
             delimited(
-                (tag("inl"), multispace1, tag("{"), multispace0),
+                (tag("inl"), multispace0, tag("{"), multispace0),
                 parse_derivation,
                 (multispace0, tag("}"), multispace0),
             ),
@@ -576,7 +586,7 @@ fn parse_proof(i: &str) -> IResult<&str, Proof> {
         ),
         map(
             delimited(
-                (tag("inr"), multispace1, tag("{"), multispace0),
+                (tag("inr"), multispace0, tag("{"), multispace0),
                 parse_derivation,
                 (multispace0, tag("}"), multispace0),
             ),
@@ -584,23 +594,23 @@ fn parse_proof(i: &str) -> IResult<&str, Proof> {
         ),
         map(
             delimited(
-                (tag("case"), multispace1, tag("{"), multispace0),
+                (tag("case"), multispace0, tag("{"), multispace0),
                 (
                     terminated(parse_derivation, (multispace0, tag(";"), multispace0)),
                     parse_assumption,
                     delimited(
                         (multispace0, tag("["), multispace0),
-                        terminated(parse_derivation, (multispace0, tag(";"), multispace0)),
-                        (multispace0, tag("]"), multispace0),
+                        parse_derivation,
+                        (multispace0, tag("]"), multispace0, tag(";"), multispace0),
                     ),
                     parse_assumption,
                     delimited(
                         (multispace0, tag("["), multispace0),
-                        terminated(parse_derivation, (multispace0, tag(";"), multispace0)),
-                        (multispace0, tag("]"), multispace0),
+                        parse_derivation,
+                        (multispace0, tag("]"), multispace0, tag(";"), multispace0),
                     ),
                 ),
-                (multispace0, tag("}"), multispace0),
+                (tag("}"), multispace0),
             ),
             |(using_or, left_param, left_case, right_param, right_case)| Proof::Case {
                 using_or: using_or.into(),
