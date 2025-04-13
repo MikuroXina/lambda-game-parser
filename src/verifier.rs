@@ -71,39 +71,35 @@ fn verify_proof<'a>(
                 });
             };
             verify_expr_has_type(env, left_expr, left.target().ty())?;
-            verify_expr_has_type(env, right_expr, left.target().ty())?;
+            verify_expr_has_type(env, right_expr, right.target().ty())?;
         }
         Proof::Left(derivation) => {
             verify_proof(env, derivation.target(), derivation.proof())?;
-            let Type::Product(left_ty, right_ty) = derivation.target().ty() else {
+            let Type::Product(left_ty, _) = derivation.target().ty() else {
                 return Err(VerificationError::MismatchedTargetType {
                     expected: Type::Product(target.ty().clone().into(), Type::Placeholder.into()),
                     actual: derivation.target().ty().clone(),
                 });
             };
-            let Expression::Left(left_expr) = target.expr() else {
-                return Err(VerificationError::MismatchedType {
-                    expr: derivation.target().expr().clone(),
-                    expected_type: Type::Product(left_ty.clone(), right_ty.clone()),
-                });
+            let Expression::Left(tuple_expr) = target.expr() else {
+                return Err(VerificationError::ExpectedExpression("left"));
             };
-            verify_expr_has_type(env, left_expr, left_ty)?;
+            verify_expr_has_type(env, tuple_expr, derivation.target().ty())?;
+            verify_match_type(target.ty(), left_ty.as_ref())?;
         }
         Proof::Right(derivation) => {
             verify_proof(env, derivation.target(), derivation.proof())?;
-            let Type::Product(left_ty, right_ty) = derivation.target().ty() else {
+            let Type::Product(_, right_ty) = derivation.target().ty() else {
                 return Err(VerificationError::MismatchedTargetType {
                     expected: Type::Product(Type::Placeholder.into(), target.ty().clone().into()),
                     actual: derivation.target().ty().clone(),
                 });
             };
-            let Expression::Right(right_expr) = target.expr() else {
-                return Err(VerificationError::MismatchedType {
-                    expr: derivation.target().expr().clone(),
-                    expected_type: Type::Product(left_ty.clone(), right_ty.clone()),
-                });
+            let Expression::Right(tuple_expr) = target.expr() else {
+                return Err(VerificationError::ExpectedExpression("right"));
             };
-            verify_expr_has_type(env, right_expr, right_ty)?;
+            verify_expr_has_type(env, tuple_expr, derivation.target().ty())?;
+            verify_match_type(target.ty(), right_ty.as_ref())?;
         }
         Proof::InL(derivation) => {
             verify_proof(env, derivation.target(), derivation.proof())?;
@@ -233,10 +229,32 @@ fn verify_expr_has_type<'a>(
             verify_expr_has_type(env, &lhs, &lhs_ty)?;
             verify_expr_has_type(env, &rhs, &rhs_ty)?;
         }
-        Expression::Left(expr)
-        | Expression::Right(expr)
-        | Expression::InL(expr)
-        | Expression::InR(expr) => return verify_expr_has_type(env, expr, ty),
+        Expression::Left(expr) => {
+            verify_expr_has_type(
+                env,
+                expr,
+                &Type::Product(ty.clone().into(), Type::Placeholder.into()),
+            )?;
+        }
+        Expression::Right(expr) => {
+            verify_expr_has_type(
+                env,
+                expr,
+                &Type::Product(Type::Placeholder.into(), ty.clone().into()),
+            )?;
+        }
+        Expression::InL(expr) => {
+            let Type::Sum(left_ty, _) = ty else {
+                return Err(VerificationError::ExpectedType("Sum"));
+            };
+            verify_expr_has_type(env, expr, left_ty)?;
+        }
+        Expression::InR(expr) => {
+            let Type::Sum(_, right_ty) = ty else {
+                return Err(VerificationError::ExpectedType("Sum"));
+            };
+            verify_expr_has_type(env, expr, right_ty)?;
+        }
         Expression::Case {
             or,
             case_left,
@@ -307,6 +325,38 @@ fn verify_match_type<'a>(
     expected: &Type<'a>,
     actual: &Type<'a>,
 ) -> Result<(), VerificationError<'a>> {
+    match (expected, actual) {
+        (Type::Product(expected_l, expected_r), Type::Product(actual_l, actual_r))
+            if expected_l == actual_l =>
+        {
+            if extends(actual_r, expected_r) {
+                return Ok(());
+            }
+        }
+        (Type::Product(expected_l, expected_r), Type::Product(actual_l, actual_r))
+            if expected_r == actual_r =>
+        {
+            if extends(actual_l, expected_l) {
+                return Ok(());
+            }
+        }
+        (Type::Func(expected_l, expected_r), Type::Func(actual_l, actual_r))
+            if expected_l == actual_l =>
+        {
+            if extends(actual_r, expected_r) {
+                return Ok(());
+            }
+        }
+        (Type::Func(expected_l, expected_r), Type::Func(actual_l, actual_r))
+            if expected_r == actual_r =>
+        {
+            // it is reversed because argument type of function is contravariant
+            if extends(expected_l, actual_l) {
+                return Ok(());
+            }
+        }
+        _ => {}
+    }
     if expected != actual {
         return Err(VerificationError::MismatchedTargetType {
             expected: expected.clone(),
@@ -314,6 +364,13 @@ fn verify_match_type<'a>(
         });
     }
     Ok(())
+}
+
+/// Checks whether `sub` type extends `sup` type.
+///
+/// It is equivalent to whether a value of `sub` type is assignable to a variable of `sup` type.
+fn extends(sub: &Type, sup: &Type) -> bool {
+    sub == sup || sup == &Type::Placeholder
 }
 
 fn find_expr_type<'a>(
@@ -329,10 +386,26 @@ fn find_expr_type<'a>(
             find_expr_type(env, &lhs)?.clone().into(),
             find_expr_type(env, &rhs)?.clone().into(),
         )),
-        Expression::Left(expr)
-        | Expression::Right(expr)
-        | Expression::InL(expr)
-        | Expression::InR(expr) => find_expr_type(env, expr),
+        Expression::Left(expr) => {
+            let Type::Product(left_ty, _) = find_expr_type(env, expr)? else {
+                return Err(VerificationError::ExpectedType("Product"));
+            };
+            Ok(*left_ty)
+        }
+        Expression::Right(expr) => {
+            let Type::Product(_, right_ty) = find_expr_type(env, expr)? else {
+                return Err(VerificationError::ExpectedType("Product"));
+            };
+            Ok(*right_ty)
+        }
+        Expression::InL(expr) => {
+            let ty = find_expr_type(env, expr)?;
+            Ok(Type::Sum(ty.into(), Type::Placeholder.into()))
+        }
+        Expression::InR(expr) => {
+            let ty = find_expr_type(env, expr)?;
+            Ok(Type::Sum(Type::Placeholder.into(), ty.into()))
+        }
         Expression::Case { case_left, .. } => {
             let Expression::Lambda { body, .. } = case_left.as_ref() else {
                 return Err(VerificationError::ExpectedExpression("lambda"));
