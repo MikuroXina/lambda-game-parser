@@ -4,14 +4,14 @@ A[3][
             x : A + B by var {
                 X
             };
-            (Y :: y : A)[
+            Y :: y : A [
                 inr(y) : B + A by inr {
                     y : A by var {
                         Y
                     }
                 }
             ];
-            (Z :: z : B)[
+            Z :: z : B [
                 inl(z) : B + A by inl {
                     z : B by var {
                         Z
