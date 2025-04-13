@@ -10,6 +10,8 @@ use nom::{
 };
 use nom_language::precedence::{Assoc, Operation, binary_op, precedence};
 
+use crate::pad_adapter::PadAdapter;
+
 #[derive(Debug)]
 pub struct LambdaGame<'a> {
     answers: Vec<Answer<'a>>,
@@ -81,12 +83,32 @@ impl Assumption<'_> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AssumptionId<'a>(&'a str);
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+
+impl std::fmt::Debug for AssumptionId<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VarId<'a>(&'a str);
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+
+impl std::fmt::Debug for VarId<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeVarId<'a>(&'a str);
+
+impl std::fmt::Debug for TypeVarId<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Derivation<'a> {
@@ -96,7 +118,11 @@ pub struct Derivation<'a> {
 
 impl std::fmt::Debug for Derivation<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?} by {:?}", self.target, self.proof)
+        if f.alternate() {
+            write!(f, "{:#?} by {:#?}", self.target, self.proof)
+        } else {
+            write!(f, "{:?} by {:?}", self.target, self.proof)
+        }
     }
 }
 
@@ -141,7 +167,7 @@ pub enum Type<'a> {
 impl std::fmt::Debug for Type<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Var(id) => f.debug_tuple("Var").field(id).finish(),
+            Self::Var(id) => write!(f, "{id:?}"),
             Self::Product(lhs, rhs) => write!(f, "{lhs:?} × {rhs:?}"),
             Self::Sum(lhs, rhs) => write!(f, "{lhs:?} + {rhs:?}"),
             Self::Func(lhs, rhs) => write!(f, "{lhs:?} -> {rhs:?}"),
@@ -150,7 +176,7 @@ impl std::fmt::Debug for Type<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub enum Expression<'a> {
     Var(VarId<'a>),
     Pair(Box<Expression<'a>>, Box<Expression<'a>>),
@@ -174,7 +200,36 @@ pub enum Expression<'a> {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+impl std::fmt::Debug for Expression<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Var(id) => write!(f, "{id:?}"),
+            Self::Pair(lhs, rhs) => f.debug_tuple("").field(lhs).field(rhs).finish(),
+            Self::Left(expr) => f.debug_tuple("left").field(expr).finish(),
+            Self::Right(expr) => f.debug_tuple("right").field(expr).finish(),
+            Self::InL(expr) => f.debug_tuple("inl").field(expr).finish(),
+            Self::InR(expr) => f.debug_tuple("inr").field(expr).finish(),
+            Self::Case {
+                or,
+                case_left,
+                case_right,
+            } => f
+                .debug_struct("case")
+                .field("or", or)
+                .field("case_left", case_left)
+                .field("case_right", case_right)
+                .finish(),
+            Self::Lambda {
+                param_id,
+                param_type,
+                body,
+            } => write!(f, "lambda {param_id:?} : {param_type:?}. {body:?}"),
+            Self::Apply { func, argument } => write!(f, "{func:?}({argument:?})"),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub enum Proof<'a> {
     Var {
         using: AssumptionId<'a>,
@@ -204,6 +259,114 @@ pub enum Proof<'a> {
     },
 }
 
+impl std::fmt::Debug for Proof<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if f.alternate() {
+            use std::fmt::Write;
+            let mut f = PadAdapter::new(f);
+            match self {
+                Proof::Var { using } => write!(
+                    f,
+                    r#"var {{
+    {using:#?}
+}}"#
+                ),
+                Proof::Pair { left, right } => write!(
+                    f,
+                    r#"pair {{
+    {left:#?};
+    {right:#?}
+}}"#
+                ),
+                Proof::Left(de) => write!(
+                    f,
+                    r#"left {{
+    {de:#?}
+}}"#
+                ),
+                Proof::Right(de) => write!(
+                    f,
+                    r#"right {{
+    {de:#?}
+}}"#
+                ),
+                Proof::InL(de) => write!(
+                    f,
+                    r#"inl {{
+    {de:#?}
+}}"#
+                ),
+                Proof::InR(de) => write!(
+                    f,
+                    r#"inr {{
+    {de:#?}
+}}"#
+                ),
+                Proof::Case {
+                    using_or,
+                    left_param,
+                    left_case,
+                    right_param,
+                    right_case,
+                } => write!(
+                    f,
+                    r#"case {{
+    {using_or:#?};
+    {left_param:#?}[
+        {left_case:#?}
+    ];
+    {right_param:#?}[
+        {right_case:#?}
+    ];
+}}"#
+                ),
+                Proof::Lambda {
+                    argument_assumption,
+                    body,
+                } => write!(
+                    f,
+                    r#"lambda {{
+    {argument_assumption:#?}[
+        {body:#?}
+    ];
+}}"#
+                ),
+                Proof::Apply { func, param } => write!(
+                    f,
+                    r#"apply {{
+    {func:#?};
+    {param:#?}
+}}"#
+                ),
+            }
+        } else {
+            match self {
+                Self::Var { using } => write!(f, "var {{ {using:?} }}"),
+                Self::Pair { left, right } => write!(f, "pair {{ {left:?}, {right:?} }}"),
+                Self::Left(expr) => write!(f, "left {{ {expr:?} }}"),
+                Self::Right(expr) => write!(f, "right {{ {expr:?} }}"),
+                Self::InL(expr) => write!(f, "inl {{ {expr:?} }}"),
+                Self::InR(expr) => write!(f, "inr {{ {expr:?} }}"),
+                Self::Case {
+                    using_or,
+                    left_param,
+                    left_case,
+                    right_param,
+                    right_case,
+                } => write!(
+                    f,
+                    "case {{ {using_or:?}; {left_param:?} [ {left_case:?} ]; {right_param:?} [ {right_case:?} ]; }}"
+                ),
+                Self::Lambda {
+                    argument_assumption,
+                    body,
+                } => write!(f, "lambda {{ {argument_assumption:?} [ {body:?} ]; }}"),
+                Self::Apply { func, param } => write!(f, "apply {{ {func:?}; {param:?} }}"),
+            }
+        }
+    }
+}
+
 fn parse_assumption(i: &str) -> IResult<&str, Assumption> {
     let (i, assumption_id) =
         terminated(parse_assumption_id, (multispace0, tag("::"), multispace0)).parse(i)?;
@@ -227,9 +390,21 @@ fn parse_type(i: &str) -> IResult<&str, Type> {
         fail(),
         fail(),
         alt((
-            binary_op(4, Assoc::Left, tag("×")),
-            binary_op(3, Assoc::Left, tag("+")),
-            binary_op(2, Assoc::Right, tag("->")),
+            binary_op(
+                4,
+                Assoc::Left,
+                delimited(multispace0, tag("×"), multispace0),
+            ),
+            binary_op(
+                3,
+                Assoc::Left,
+                delimited(multispace0, tag("+"), multispace0),
+            ),
+            binary_op(
+                2,
+                Assoc::Right,
+                delimited(multispace0, tag("->"), multispace0),
+            ),
         )),
         parse_type_var,
         |op: Operation<&str, &str, &str, Type>| match op {
@@ -296,17 +471,13 @@ fn parse_lambda(i: &str) -> IResult<&str, Expression> {
 }
 
 fn parse_apply(i: &str) -> IResult<&str, Expression> {
-    let (i, func) = parse_expression(i)?;
-    let (i, argument) = delimited(
-        (multispace0, tag("("), multispace0),
-        parse_expression,
-        (multispace0, tag(")"), multispace0),
-    )
-    .parse(i)?;
+    let (i, func) = terminated(parse_var_id, (multispace0, tag("("), multispace0)).parse(i)?;
+    let (i, argument) =
+        terminated(parse_expression, (multispace0, tag(")"), multispace0)).parse(i)?;
     Ok((
         i,
         Expression::Apply {
-            func: func.into(),
+            func: Expression::Var(func).into(),
             argument: argument.into(),
         },
     ))
@@ -314,8 +485,6 @@ fn parse_apply(i: &str) -> IResult<&str, Expression> {
 
 fn parse_expression(i: &str) -> IResult<&str, Expression> {
     alt((
-        map(parse_var_id, |id| Expression::Var(id)),
-        parse_pair,
         map(
             delimited(
                 (tag("left("), multispace0),
@@ -351,6 +520,8 @@ fn parse_expression(i: &str) -> IResult<&str, Expression> {
         parse_case,
         parse_lambda,
         parse_apply,
+        parse_pair,
+        map(parse_var_id, |id| Expression::Var(id)),
     ))
     .parse(i)
 }

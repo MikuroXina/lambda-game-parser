@@ -7,6 +7,7 @@ use anyhow::{Context, Result, anyhow};
 use self::{ast::LambdaGame, verifier::verify};
 
 mod ast;
+mod pad_adapter;
 mod verifier;
 
 fn main() -> Result<()> {
@@ -18,7 +19,7 @@ fn main() -> Result<()> {
         .context("file read error")?;
 
     let game = LambdaGame::from(&program).context("parse failure")?;
-    println!("{game:?}");
+    println!("{game:#?}");
 
     verify(&game)
         .map_err(|err| anyhow!(err.to_string()))
