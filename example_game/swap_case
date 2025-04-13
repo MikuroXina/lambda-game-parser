@@ -1,6 +1,6 @@
 A[3][
-    X :: x : A + B |- case(x, y : A. inr(y), z : B. inl(z)) : B + A in Lambda since
-        case(x, y : A. inr(y), z : B. inl(z)) : B + A by case {
+    X :: x : A + B |- case(x, lambda y : A. inr(y), lambda z : B. inl(z)) : B + A in Lambda since
+        case(x, lambda y : A. inr(y), lambda z : B. inl(z)) : B + A by case {
             x : A + B by var {
                 X
             };
