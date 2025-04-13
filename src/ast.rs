@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use anyhow::{Context, Result, anyhow};
 use nom::{
     IResult, Parser,
@@ -39,40 +37,29 @@ pub struct Answer<'a> {
     body: Derivation<'a>,
 }
 
-#[derive(Default)]
-pub struct Env<'a> {
-    assumptions: HashMap<AssumptionId<'a>, Assumption<'a>>,
-    type_by_var: HashMap<VarId<'a>, Vec<Type<'a>>>,
-}
+impl Answer<'_> {
+    pub fn env(&self) -> &Env {
+        &self.env
+    }
 
-impl std::fmt::Debug for Env<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Env")
-            .field("assumptions", &self.assumptions)
-            .finish()
+    pub fn body(&self) -> &Derivation {
+        &self.body
     }
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct Env<'a> {
+    assumptions: Vec<Assumption<'a>>,
+}
+
 impl<'a> Env<'a> {
-    fn from(list: Vec<Assumption<'a>>) -> Self {
-        let mut assumptions = HashMap::new();
-        let mut type_by_var = HashMap::new();
-        for item in list {
-            assumptions.insert(item.0.clone(), item.clone());
-            type_by_var
-                .entry(item.1)
-                .or_insert_with(Vec::new)
-                .push(item.2);
-        }
-        Self {
-            assumptions,
-            type_by_var,
-        }
+    pub fn assumptions(&self) -> impl Iterator<Item = &Assumption> {
+        self.assumptions.iter()
     }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
-struct Assumption<'a>(AssumptionId<'a>, VarId<'a>, Type<'a>);
+pub struct Assumption<'a>(AssumptionId<'a>, VarId<'a>, Type<'a>);
 
 impl std::fmt::Debug for Assumption<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -80,14 +67,29 @@ impl std::fmt::Debug for Assumption<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct AssumptionId<'a>(&'a str);
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct VarId<'a>(&'a str);
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct TypeVarId<'a>(&'a str);
+impl Assumption<'_> {
+    pub fn id(&self) -> AssumptionId {
+        self.0
+    }
 
-struct Derivation<'a> {
+    pub fn var_id(&self) -> VarId {
+        self.1
+    }
+
+    pub fn ty(&self) -> &Type {
+        &self.2
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AssumptionId<'a>(&'a str);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VarId<'a>(&'a str);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeVarId<'a>(&'a str);
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct Derivation<'a> {
     target: Target<'a>,
     proof: Proof<'a>,
 }
@@ -98,7 +100,18 @@ impl std::fmt::Debug for Derivation<'_> {
     }
 }
 
-struct Target<'a>(VarId<'a>, Type<'a>);
+impl Derivation<'_> {
+    pub fn target(&self) -> &Target {
+        &self.target
+    }
+
+    pub fn proof(&self) -> &Proof {
+        &self.proof
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct Target<'a>(Expression<'a>, Type<'a>);
 
 impl std::fmt::Debug for Target<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -106,8 +119,18 @@ impl std::fmt::Debug for Target<'_> {
     }
 }
 
+impl Target<'_> {
+    pub fn expr(&self) -> &Expression {
+        &self.0
+    }
+
+    pub fn ty(&self) -> &Type {
+        &self.1
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash)]
-enum Type<'a> {
+pub enum Type<'a> {
     Var(TypeVarId<'a>),
     Product(Box<Type<'a>>, Box<Type<'a>>),
     Sum(Box<Type<'a>>, Box<Type<'a>>),
@@ -127,7 +150,8 @@ impl std::fmt::Debug for Type<'_> {
     }
 }
 
-enum Expression<'a> {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Expression<'a> {
     Var(VarId<'a>),
     Pair(Box<Expression<'a>>, Box<Expression<'a>>),
     Left(Box<Expression<'a>>),
@@ -150,8 +174,8 @@ enum Expression<'a> {
     },
 }
 
-#[derive(Debug)]
-enum Proof<'a> {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Proof<'a> {
     Var {
         using: AssumptionId<'a>,
     },
@@ -451,17 +475,16 @@ fn parse_proof(i: &str) -> IResult<&str, Proof> {
     .parse(i)
 }
 
+fn parse_target(i: &str) -> IResult<&str, Target> {
+    let (i, expr) = terminated(parse_expression, (multispace0, tag(":"), multispace0)).parse(i)?;
+    let (i, ty) = terminated(parse_type, multispace1).parse(i)?;
+    Ok((i, Target(expr, ty)))
+}
+
 fn parse_derivation(i: &str) -> IResult<&str, Derivation> {
-    let (i, (var_id, ty)) =
-        terminated(parse_var_decl, (multispace1, tag("by"), multispace1)).parse(i)?;
+    let (i, target) = terminated(parse_target, (tag("by"), multispace0)).parse(i)?;
     let (i, proof) = terminated(parse_proof, multispace0).parse(i)?;
-    Ok((
-        i,
-        Derivation {
-            target: Target(var_id, ty),
-            proof,
-        },
-    ))
+    Ok((i, Derivation { target, proof }))
 }
 
 fn parse_assumptions(i: &str) -> IResult<&str, Vec<Assumption>> {
@@ -480,8 +503,7 @@ fn parse_answer(i: &str) -> IResult<&str, Answer> {
     )
     .parse(i)?;
     let (i, assumptions) = parse_assumptions(i)?;
-    let (i, (var_id, ty)) =
-        delimited((tag("|-"), multispace0), parse_var_decl, multispace0).parse(i)?;
+    let (i, target) = delimited((tag("|-"), multispace0), parse_target, multispace0).parse(i)?;
     let (i, body) = delimited(
         (
             tag("in"),
@@ -498,9 +520,9 @@ fn parse_answer(i: &str) -> IResult<&str, Answer> {
     Ok((
         i,
         Answer {
-            env: Env::from(assumptions),
+            env: Env { assumptions },
             identifier,
-            target: Target(var_id, ty),
+            target,
             body,
         },
     ))
